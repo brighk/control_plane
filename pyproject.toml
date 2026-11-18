@@ -1,7 +1,9 @@
 [project]
 name = "control-plane"
-version = "0.1.0"
+version = "0.1.1"
 requires-python = ">=3.13"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     "fastapi[standard]>=0.163.2",
     "itsdangerous>=2.2.0",
