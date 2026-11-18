@@ -55,6 +55,16 @@
     }
     .state.online::before  { background: var(--ok); }
     .state.offline::before { background: var(--danger); }
+    #history table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    #history th {
+      text-align: left; font-weight: 600; color: var(--muted);
+      border-bottom: 1px solid var(--border); padding: 6px 4px;
+    }
+    #history td { border-bottom: 1px solid var(--border); padding: 6px 4px; vertical-align: top; }
+    #history td.time { white-space: nowrap; color: var(--muted); }
+    #history .ok { color: var(--ok); }
+    #history .failed { color: var(--danger); }
+    #history .detail { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
     details summary { cursor: pointer; font-weight: 600; margin-top: 24px; }
   </style>
 </head>
@@ -108,6 +118,14 @@
         <div class="row"><button type="submit">Add host</button></div>
       </form>
     </details>
+
+    <section id="history" hidden>
+      <h2>History</h2>
+      <table>
+        <thead><tr><th>Time</th><th>Host</th><th>Action</th><th>Result</th></tr></thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </section>
   </main>
 
   <script>
@@ -173,6 +191,7 @@
       $("app-view").hidden = false;
       setStatus("");
       await loadHosts();
+      loadHistory();
       startPolling(60_000);
     }
 
@@ -229,7 +248,42 @@
       btn.disabled = true;
       try { await fn(); }
       catch (e) { setStatus(e.message, "error"); }
-      finally { btn.disabled = hosts.length === 0; }
+      finally {
+        btn.disabled = hosts.length === 0;
+        loadHistory();  // failed attempts are recorded too
+      }
+    }
+
+    const timeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" });
+
+    async function loadHistory() {
+      let events;
+      try { events = await api("GET", "/api/events?limit=20"); }
+      catch { return; }  // history is secondary; don't overwrite the status message
+      $("history").hidden = events.length === 0;
+      const rows = events.map((ev) => {
+        const tr = document.createElement("tr");
+        const cell = (text, cls) => {
+          const td = document.createElement("td");
+          td.textContent = text;  // textContent: no HTML injection from host names/errors
+          if (cls) td.className = cls;
+          tr.append(td);
+          return td;
+        };
+        const time = cell(timeFormat.format(new Date(ev.created_at)), "time");
+        time.title = new Date(ev.created_at).toLocaleString();
+        cell(ev.host_name);
+        cell(ev.action === "wake" ? "Wake" : "Shutdown");
+        const result = cell(ev.success ? "Sent" : "Failed", ev.success ? "ok" : "failed");
+        if (ev.detail) {
+          const d = document.createElement("span");
+          d.className = "detail";
+          d.textContent = ev.detail;
+          result.append(d);
+        }
+        return tr;
+      });
+      $("history-body").replaceChildren(...rows);
     }
 
     $("login-view").addEventListener("submit", async (e) => {
