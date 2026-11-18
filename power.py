@@ -1,5 +1,7 @@
+import platform
 import re
 import socket
+import subprocess
 
 import paramiko
 
@@ -71,3 +73,36 @@ def shutdown_now(
             raise RuntimeError(f"Shutdown command reported an error: {error_output}")
     finally:
         ssh.close()
+
+
+def is_host_up(ip: str, count: int = 2, timeout: int = 1) -> bool:
+    """
+    Checks if a host is online by pinging its IP address.
+    Returns True if the host responds, False otherwise.
+    """
+    op_sys = platform.system().lower()
+    param = "-n" if op_sys == "windows" else "-c"
+    timeout_param = "-w" if op_sys == "windows" else "-W"
+
+    # Windows timeout is in milliseconds, Linux/macOS is in seconds
+    timeout_value = str(timeout * 1000) if op_sys == "windows" else str(timeout)
+
+    # Build the ping command
+    command = ["ping", param, str(count), timeout_param, timeout_value, ip]
+    process_timeout = (count * timeout) + 2
+    try:
+        # Run the command and suppress output streams
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=process_timeout,
+        )
+
+        # If the return code is 0, the ping was successful (host is up)
+        return result.returncode == 0
+
+    except Exception as e:
+        print(f"Error executing ping: {e}")
+        return False

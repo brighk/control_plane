@@ -5,7 +5,7 @@ from auth import CurrentUser
 from config import SSH_KEY_PATH
 from db import SessionDep
 from models import Host, HostCreate, HostPublic
-from power import shutdown_now, wake_on_call
+from power import is_host_up, shutdown_now, wake_on_call
 
 router = APIRouter(prefix="/api/hosts", tags=["hosts"])
 
@@ -69,3 +69,9 @@ def shutdown(host_id: int, user: CurrentUser, session: SessionDep):
     except Exception as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Shutdown failed: {e}")
     return {"status": f"Shutdown command sent to {host.name}"}
+
+
+@router.get("/{host_id}/status")
+def host_status(host_id: int, user: CurrentUser, session: SessionDep):
+    host = get_owned_host(host_id, user, session)
+    return {"online": is_host_up(host.ip)}

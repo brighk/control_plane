@@ -1,3 +1,4 @@
+import ipaddress
 from enum import StrEnum
 
 from pydantic import field_validator
@@ -37,6 +38,14 @@ class HostCreate(HostBase):
     @classmethod
     def validate_mac(cls, v: str) -> str:
         return normalize_mac(v)
+
+    @field_validator("ip")
+    @classmethod
+    def validate_ip(cls, v: str) -> str:
+        try:
+            return str(ipaddress.ip_address(v.strip()))
+        except ValueError as e:
+            raise ValueError(f"Invalid IP address: '{v}'") from e
 
 
 class HostPublic(HostBase):
