@@ -2,6 +2,10 @@
 
 A Python backend (FastAPI) with a small web page for powering hosts on and off: it sends magic packets to perform **Wake-on-LAN**, or connects over **SSH** and runs the `shutdown` command.
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="Control Plane web page: a host selected in the dropdown with its status, and Wake, Shutdown and Remove host buttons" width="420">
+</p>
+
 ## Usage
 
 1. Create a user:
