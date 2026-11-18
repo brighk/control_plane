@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Control Plane</title>
+  <style>
+    :root {
+      --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #677085;
+      --border: #d9dde5; --accent: #2f6fed; --danger: #d64545; --ok: #1f8a4c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14171d; --card: #1d212a; --text: #e6e8ee; --muted: #9aa2b2;
+        --border: #333a47; --accent: #5b8dff; --danger: #ef6b6b; --ok: #4cc27f;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: start center;
+      background: var(--bg); color: var(--text);
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      padding: 48px 16px;
+    }
+    .card {
+      width: 100%; max-width: 420px; background: var(--card);
+      border: 1px solid var(--border); border-radius: 12px; padding: 24px;
+    }
+    h1 { font-size: 20px; margin: 0 0 16px; }
+    h2 { font-size: 15px; margin: 24px 0 12px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+    input, select {
+      width: 100%; padding: 9px 10px; font: inherit; color: var(--text);
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    }
+    button {
+      font: inherit; font-weight: 600; padding: 9px 14px; border-radius: 8px;
+      border: 1px solid transparent; cursor: pointer; background: var(--accent); color: #fff;
+    }
+    button:disabled { opacity: .5; cursor: default; }
+    button.danger { background: var(--danger); }
+    button.secondary { background: transparent; color: var(--text); border-color: var(--border); }
+    .row { display: flex; gap: 8px; margin-top: 12px; }
+    .row > button { flex: 1; }
+    .header { display: flex; justify-content: space-between; align-items: center; }
+    .header span { color: var(--muted); font-size: 13px; }
+    #status { margin-top: 16px; min-height: 1.5em; font-size: 14px; }
+    #status.error { color: var(--danger); }
+    #status.ok { color: var(--ok); }
+    [hidden] { display: none !important; }
+    details summary { cursor: pointer; font-weight: 600; margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <!-- Login -->
+  <form id="login-view" class="card" hidden>
+    <h1>Control Plane</h1>
+    <label for="username">Username</label>
+    <input id="username" autocomplete="username" required>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" required>
+    <div class="row"><button type="submit">Log in</button></div>
+    <div id="login-status" class="error"></div>
+  </form>
+
+  <!-- Main -->
+  <main id="app-view" class="card" hidden>
+    <div class="header">
+      <h1>Control Plane</h1>
+      <span><span id="whoami"></span> · <a href="#" id="logout">Log out</a></span>
+    </div>
+
+    <label for="host-select">Host</label>
+    <select id="host-select"></select>
+    <div class="row">
+      <button id="wake-btn">Wake</button>
+      <button id="shutdown-btn" class="danger">Shutdown</button>
+    </div>
+    <div class="row">
+      <button id="delete-btn" class="secondary">Remove host</button>
+    </div>
+    <div id="status"></div>
+
+    <details id="add-details">
+      <summary>Add host</summary>
+      <form id="add-form">
+        <label for="h-name">Name</label>
+        <input id="h-name" placeholder="Living room PC" required>
+        <label for="h-mac">MAC address</label>
+        <input id="h-mac" placeholder="AA:BB:CC:DD:EE:FF" required>
+        <label for="h-ip">IP address / hostname</label>
+        <input id="h-ip" placeholder="192.168.1.50" required>
+        <label for="h-user">SSH username</label>
+        <input id="h-user" value="admin" required>
+        <label for="h-os">OS</label>
+        <select id="h-os">
+          <option value="linux">Linux</option>
+          <option value="windows">Windows</option>
+        </select>
+        <div class="row"><button type="submit">Add host</button></div>
+      </form>
+    </details>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let hosts = [];
+
+    async function api(method, path, body) {
+      const res = await fetch(path, {
+        method,
+        headers: body ? { "Content-Type": "application/json" } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (res.status === 401 && path !== "/api/auth/login") {
+        showLogin();
+        throw new Error("Session expired, please log in again");
+      }
+      const data = res.status === 204 ? null : await res.json().catch(() => null);
+      if (!res.ok) throw new Error(errorText(data) || `Request failed (${res.status})`);
+      return data;
+    }
+
+    // FastAPI errors are {detail: "..."} or {detail: [{msg, loc}, ...]} for validation.
+    function errorText(data) {
+      if (!data || !data.detail) return null;
+      if (typeof data.detail === "string") return data.detail;
+      return data.detail.map((d) => `${d.loc.at(-1)}: ${d.msg}`).join("; ");
+    }
+
+    function setStatus(text, kind = "") {
+      $("status").textContent = text;
+      $("status").className = kind;
+    }
+
+    function showLogin() {
+      $("app-view").hidden = true;
+      $("login-view").hidden = false;
+      $("username").focus();
+    }
+
+    async function showApp(username) {
+      $("whoami").textContent = username;
+      $("login-view").hidden = true;
+      $("app-view").hidden = false;
+      setStatus("");
+      await loadHosts();
+    }
+
+    async function loadHosts(selectId) {
+      hosts = await api("GET", "/api/hosts");
+      const select = $("host-select");
+      select.replaceChildren();
+      for (const h of hosts) {
+        const opt = document.createElement("option");
+        opt.value = h.id;
+        opt.textContent = `${h.name} (${h.ip})`;  // textContent: no HTML injection
+        select.append(opt);
+      }
+      if (selectId) select.value = selectId;
+      const empty = hosts.length === 0;
+      for (const id of ["wake-btn", "shutdown-btn", "delete-btn", "host-select"]) $(id).disabled = empty;
+      if (empty) {
+        setStatus("No hosts yet. Add one below.");
+        $("add-details").open = true;
+      }
+    }
+
+    function selectedHost() {
+      return hosts.find((h) => String(h.id) === $("host-select").value);
+    }
+
+    async function runAction(btn, fn) {
+      btn.disabled = true;
+      try { await fn(); }
+      catch (e) { setStatus(e.message, "error"); }
+      finally { btn.disabled = hosts.length === 0; }
+    }
+
+    $("login-view").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      $("login-status").textContent = "";
+      try {
+        const me = await api("POST", "/api/auth/login", {
+          username: $("username").value, password: $("password").value,
+        });
+        $("password").value = "";
+        await showApp(me.username);
+      } catch (err) {
+        $("login-status").textContent = err.message;
+      }
+    });
+
+    $("logout").addEventListener("click", async (e) => {
+      e.preventDefault();
+      await api("POST", "/api/auth/logout").catch(() => {});
+      showLogin();
+    });
+
+    $("wake-btn").addEventListener("click", (e) => runAction(e.target, async () => {
+      const h = selectedHost();
+      setStatus(`Waking ${h.name}…`);
+      setStatus((await api("POST", `/api/hosts/${h.id}/wake`)).status, "ok");
+    }));
+
+    $("shutdown-btn").addEventListener("click", (e) => runAction(e.target, async () => {
+      const h = selectedHost();
+      if (!confirm(`Shut down ${h.name}?`)) return;
+      setStatus(`Shutting down ${h.name}…`);
+      setStatus((await api("POST", `/api/hosts/${h.id}/shutdown`)).status, "ok");
+    }));
+
+    $("delete-btn").addEventListener("click", (e) => runAction(e.target, async () => {
+      const h = selectedHost();
+      if (!confirm(`Remove ${h.name} from your hosts?`)) return;
+      await api("DELETE", `/api/hosts/${h.id}`);
+      await loadHosts();
+      if (hosts.length) setStatus(`Removed ${h.name}`, "ok");
+    }));
+
+    $("add-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        const host = await api("POST", "/api/hosts", {
+          name: $("h-name").value, mac: $("h-mac").value, ip: $("h-ip").value,
+          ssh_username: $("h-user").value, os_type: $("h-os").value,
+        });
+        e.target.reset();
+        $("add-details").open = false;
+        await loadHosts(host.id);
+        setStatus(`Added ${host.name}`, "ok");
+      } catch (err) {
+        setStatus(err.message, "error");
+      }
+    });
+
+    // On load: already logged in (cookie) → app, otherwise → login form.
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((me) => showApp(me.username))
+      .catch(showLogin);
+  </script>
+</body>
+</html>
