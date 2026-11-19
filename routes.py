@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlmodel import Session, col, select, update
 
 from auth import CurrentUser
-from config import SSH_KEY_PATH
+from config import ARCHER_METRICS_URL, SSH_KEY_PATH
 from db import SessionDep
 from models import (
     Host,
@@ -15,10 +15,14 @@ from models import (
     PowerEventPublic,
     User,
 )
+from network import NetworkReader, NetworkStatus
 from power import is_host_up, shutdown_now, wake_on_call
 
 router = APIRouter(prefix="/api/hosts", tags=["hosts"])
 events_router = APIRouter(prefix="/api/events", tags=["events"])
+network_router = APIRouter(prefix="/api/network", tags=["network"])
+
+network_reader = NetworkReader(ARCHER_METRICS_URL) if ARCHER_METRICS_URL else None
 
 
 def get_owned_host(host_id: int, user: CurrentUser, session: SessionDep) -> Host:
@@ -136,3 +140,17 @@ def list_events(
         query = query.where(PowerEvent.host_id == host_id)
     query = query.order_by(col(PowerEvent.created_at).desc(), col(PowerEvent.id).desc())
     return session.exec(query.limit(limit)).all()
+
+
+@network_router.get("", response_model=NetworkStatus)
+def network_status(user: CurrentUser):
+    """Router and device info from archer-monitor. {enabled: false} if not configured."""
+    if network_reader is None:
+        return NetworkStatus(enabled=False)
+    try:
+        return network_reader.read()
+    except Exception as e:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Can't read router metrics from {network_reader.url}: {e}",
+        )

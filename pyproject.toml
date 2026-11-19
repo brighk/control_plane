@@ -8,6 +8,7 @@ dependencies = [
     "fastapi[standard]>=0.163.2",
     "itsdangerous>=2.2.0",
     "paramiko>=5.1.0",
+    "prometheus-client>=0.20",
     "pwdlib[argon2]>=0.4.2",
     "sqlmodel>=0.0.50",
 ]
@@ -16,6 +17,7 @@ dependencies = [
 dev = [
     "prek>=0.5.11",
     "pyright>=1.1.414",
+    "pytest>=8",
     "ruff>=0.17.5",
     "types-paramiko>=5.1.0.20261030",
 ]
@@ -28,3 +30,7 @@ include = ["."]
 typeCheckingMode = "standard"
 venvPath = "."
 venv = ".venv"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -23,6 +23,7 @@ app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, same_site="lax")
 app.include_router(auth.router)
 app.include_router(routes.router)
 app.include_router(routes.events_router)
+app.include_router(routes.network_router)
 
 # Mounted last so /api/* routes take precedence. Serves static/index.html at "/".
 app.mount(

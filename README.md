@@ -40,6 +40,31 @@ A Python backend (FastAPI) with a small web page for powering hosts on and off: 
 - Enable Wake-on-LAN in the host's UEFI/BIOS.
 - Run the app on the same local network as the host, since magic packets are broadcast and don't cross routers.
 
+## Network view (TP-Link Archer)
+
+The page can show your router's devices: who's online, connection band, current
+download/upload, Wi-Fi link rate and signal, plus internet status and throughput. The data
+comes from archer-monitor, a Prometheus exporter for the Archer A6 v4.
+
+The app doesn't log in to the router itself. The router allows one admin session, and
+archer-monitor holds it. The app reads archer-monitor's `/metrics` endpoint on the server
+side and serves the result to logged-in users at `/api/network`.
+
+1. Run archer-monitor (usually on the same Raspberry Pi).
+2. Point the app at it:
+   ```bash
+   export CONTROL_PLANE_ARCHER_METRICS_URL=http://127.0.0.1:9105/metrics
+   ```
+   If the variable is unset, the Network section is hidden.
+
+Devices whose MAC matches one of your saved hosts get a badge with the host's name.
+
+## Tests
+
+```bash
+uv run pytest
+```
+
 ## License
 
 Released under the [MIT License](LICENSE).

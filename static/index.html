@@ -17,7 +17,8 @@
     }
     * { box-sizing: border-box; }
     body {
-      margin: 0; min-height: 100vh; display: grid; place-items: start center;
+      margin: 0; min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center; gap: 16px;
       background: var(--bg); color: var(--text);
       font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
       padding: 48px 16px;
@@ -66,6 +67,32 @@
     #history .failed { color: var(--danger); }
     #history .detail { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
     details summary { cursor: pointer; font-weight: 600; margin-top: 24px; }
+
+    .card.wide { max-width: 820px; min-width: 0; }  /* min-width: let the table scroll inside */
+    #network h1 { margin-bottom: 4px; }
+    #net-summary { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--muted); }
+    #net-summary b { color: var(--text); font-weight: 600; }
+    #net-warning { margin-top: 12px; font-size: 13px; color: var(--danger); }
+    .table-wrap { overflow-x: auto; margin-top: 16px; }
+    #network table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    #network th {
+      text-align: left; font-weight: 600; color: var(--muted); white-space: nowrap;
+      border-bottom: 1px solid var(--border); padding: 6px 8px;
+    }
+    #network td { border-bottom: 1px solid var(--border); padding: 8px; vertical-align: top; }
+    #network th.num, #network td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    #network .sub { display: block; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    #network tr.offline td { color: var(--muted); }
+    #network .badge {
+      display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px;
+      font-size: 11px; font-weight: 600; color: var(--accent); border: 1px solid var(--accent);
+      white-space: nowrap;
+    }
+    #network .dot::before {
+      content: ""; display: inline-block; width: 8px; height: 8px;
+      border-radius: 50%; margin-right: 6px; background: var(--muted);
+    }
+    #network .dot.on::before { background: var(--ok); }
   </style>
 </head>
 <body>
@@ -128,11 +155,32 @@
     </section>
   </main>
 
+  <!-- Network (from archer-monitor; hidden unless the server has it configured) -->
+  <section id="network" class="card wide" hidden>
+    <h1>Network</h1>
+    <div id="net-summary"></div>
+    <div id="net-warning" hidden></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Device</th><th>Connection</th>
+            <th class="num">Download</th><th class="num">Upload</th>
+            <th class="num" title="Wi-Fi link rate, router → device / device → router">Link</th>
+            <th class="num" title="Router's signal value (aveRssi); higher is better">Signal</th>
+          </tr>
+        </thead>
+        <tbody id="net-body"></tbody>
+      </table>
+    </div>
+  </section>
+
   <script>
     const $ = (id) => document.getElementById(id);
     let hosts = [];
     let stateTimer = null;     // repeats refreshHostState
     let slowDownTimer = null;  // switches fast polling back to slow
+    let networkTimer = null;   // repeats loadNetwork while the page is visible
 
     function startPolling(ms) {
       clearInterval(stateTimer);  // never run two timers at once
@@ -149,6 +197,8 @@
     function stopPolling() {
       clearInterval(stateTimer);
       clearTimeout(slowDownTimer);
+      clearInterval(networkTimer);
+      networkTimer = null;
     }
 
     async function api(method, path, body) {
@@ -181,6 +231,7 @@
     function showLogin() {
       stopPolling();  // covers both logout and expired session (api() calls this on 401)
       $("app-view").hidden = true;
+      $("network").hidden = true;
       $("login-view").hidden = false;
       $("username").focus();
     }
@@ -193,6 +244,7 @@
       await loadHosts();
       loadHistory();
       startPolling(60_000);
+      startNetworkPolling();
     }
 
     async function loadHosts(selectId) {
@@ -284,6 +336,132 @@
         return tr;
       });
       $("history-body").replaceChildren(...rows);
+    }
+
+    // ---- Network (archer-monitor) ----
+
+    function startNetworkPolling() {
+      clearInterval(networkTimer);
+      loadNetwork();
+      networkTimer = setInterval(loadNetwork, 10_000);
+    }
+
+    // Don't poll in a background tab; refresh right away when it comes back.
+    document.addEventListener("visibilitychange", () => {
+      if ($("app-view").hidden) return;
+      if (document.hidden) { clearInterval(networkTimer); networkTimer = null; }
+      else if (!networkTimer) startNetworkPolling();
+    });
+
+    const CONNECTIONS = {
+      wired: "Wired", "2.4ghz": "2.4 GHz", "5ghz": "5 GHz",
+      "guest_2.4ghz": "Guest 2.4 GHz", guest_5ghz: "Guest 5 GHz",
+      "iot_2.4ghz": "IoT 2.4 GHz", iot_5ghz: "IoT 5 GHz", offline: "Offline",
+    };
+
+    // The router UI shows bits/s, so do the same.
+    function formatRate(bytesPerSecond) {
+      if (bytesPerSecond == null) return "—";
+      const bits = bytesPerSecond * 8;
+      if (bits < 1_000) return `${Math.round(bits)} bps`;
+      if (bits < 1_000_000) return `${(bits / 1_000).toFixed(1)} kbps`;
+      return `${(bits / 1_000_000).toFixed(1)} Mbps`;
+    }
+
+    function formatDuration(seconds) {
+      const d = Math.floor(seconds / 86400), h = Math.floor(seconds / 3600) % 24, m = Math.floor(seconds / 60) % 60;
+      return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+    }
+
+    function ago(unixSeconds) {
+      const s = Math.max(0, Math.round(Date.now() / 1000 - unixSeconds));
+      return s < 60 ? `${s}s ago` : `${formatDuration(s)} ago`;
+    }
+
+    function summaryItem(label, value) {
+      const span = document.createElement("span");
+      const b = document.createElement("b");
+      b.textContent = value;
+      span.append(`${label} `, b);
+      return span;
+    }
+
+    async function loadNetwork() {
+      let net;
+      try {
+        net = await api("GET", "/api/network");
+      } catch (e) {
+        $("network").hidden = false;
+        $("net-warning").hidden = false;
+        $("net-warning").textContent = e.message;
+        return;  // keep the last table on screen
+      }
+      if (!net.enabled) {
+        $("network").hidden = true;
+        clearInterval(networkTimer);
+        networkTimer = null;
+        return;
+      }
+      $("network").hidden = false;
+
+      const online = net.devices.filter((d) => d.online).length;
+      const summary = [
+        summaryItem("Internet", net.wan_up == null ? "unknown" : net.wan_up ? "connected" : "down"),
+      ];
+      if (net.wan_up && net.wan_uptime_seconds != null) summary.push(summaryItem("for", formatDuration(net.wan_uptime_seconds)));
+      if (net.wan_download_bytes_per_second != null) {
+        summary.push(summaryItem("↓", formatRate(net.wan_download_bytes_per_second)));
+        summary.push(summaryItem("↑", formatRate(net.wan_upload_bytes_per_second)));
+      }
+      summary.push(summaryItem("Devices", `${online} of ${net.devices.length} online`));
+      if (net.last_success) summary.push(summaryItem("Updated", ago(net.last_success)));
+      $("net-summary").replaceChildren(...summary);
+
+      const warn = $("net-warning");
+      warn.hidden = net.router_reachable;
+      warn.textContent = net.last_success
+        ? `The exporter can't reach the router right now. Showing data from ${ago(net.last_success)}.`
+        : "The exporter hasn't reached the router yet.";
+
+      // Saved hosts by MAC, so devices you control from here are easy to spot.
+      const hostByMac = new Map(hosts.map((h) => [h.mac.toUpperCase(), h.name]));
+
+      const rows = net.devices.map((d) => {
+        const tr = document.createElement("tr");
+        if (!d.online) tr.className = "offline";
+        const cell = (text, cls) => {
+          const td = document.createElement("td");
+          td.textContent = text;  // textContent: device names come from the network
+          if (cls) td.className = cls;
+          tr.append(td);
+          return td;
+        };
+
+        const dev = cell(d.name === "unknown" ? "Unknown device" : d.name);
+        const host = hostByMac.get(d.mac.toUpperCase());
+        if (host) {
+          const badge = document.createElement("span");
+          badge.className = "badge";
+          badge.textContent = host;
+          badge.title = "Saved host";
+          dev.append(badge);
+        }
+        const sub = document.createElement("span");
+        sub.className = "sub";
+        sub.textContent = d.ip && d.ip !== "0.0.0.0" ? `${d.ip} · ${d.mac}` : d.mac;
+        dev.append(sub);
+
+        const conn = cell(CONNECTIONS[d.connection] ?? d.connection);
+        conn.classList.add("dot");
+        if (d.online) conn.classList.add("on");
+
+        cell(d.online ? formatRate(d.download_bytes_per_second) : "—", "num");
+        cell(d.online ? formatRate(d.upload_bytes_per_second) : "—", "num");
+        cell(d.tx_rate_mbps != null ? `${d.tx_rate_mbps} / ${d.rx_rate_mbps ?? "—"} Mbps` : "—", "num");
+        cell(d.signal != null ? String(d.signal) : "—", "num");
+        return tr;
+      });
+      $("net-body").replaceChildren(...rows);
     }
 
     $("login-view").addEventListener("submit", async (e) => {
